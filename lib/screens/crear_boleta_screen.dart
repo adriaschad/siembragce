@@ -13,6 +13,7 @@ import '../models/boleta.dart';
 import '../models/distancia_cama.dart';
 import '../models/distancia_planta.dart';
 import '../services/outbox_service.dart';
+import '../models/caracteristica_siembra.dart';
 
 class CrearBoletaScreen extends StatefulWidget {
   final String? token;
@@ -50,6 +51,8 @@ class _CrearBoletaScreenState extends State<CrearBoletaScreen> {
   List<VariedadProductor> variedadProductores = [];
   List<DistanciaCama> distanciasCama = [];
   List<DistanciaPlanta> distanciasPlanta = [];
+  List<CaracteristicaSiembra> caracteristicas = [];
+  List<CaracteristicaSiembra> caracteristicasFiltradas = [];
 
   Finca? fincaSeleccionada;
   Lote? loteSeleccionado;
@@ -57,11 +60,14 @@ class _CrearBoletaScreenState extends State<CrearBoletaScreen> {
   Variedad? variedadSeleccionada;
   DistanciaCama? distanciaCamaSeleccionada;
   DistanciaPlanta? distanciaPlantaSeleccionada;
+  CaracteristicaSiembra? caracteristicaSeleccionada;
 
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _areaController = TextEditingController();
   final TextEditingController _lotesSemillaController = TextEditingController();
   DateTime? fechaSiembra;
+
+  bool _saving = false; // <-- nuevo flag
 
   @override
   void initState() {
@@ -90,13 +96,14 @@ class _CrearBoletaScreenState extends State<CrearBoletaScreen> {
     final boxVariedadProductor = await Hive.openBox<VariedadProductor>(
       'variedad_productor',
     );
-    /*final boxDistanciasCama = await Hive.openBox<DistanciaCama>(
-      'distancias_cama',
-    );*/
 
-    /*final boxDistanciasPlanta = await Hive.openBox<DistanciaPlanta>(
-      'distancias_planta',
-    );*/
+    final boxCaracteristicas = await Hive.openBox<CaracteristicaSiembra>(
+      'caracteristicas_siembra',
+    );
+
+    // Por defecto, sin variedad seleccionada, puedes mostrar todas
+    caracteristicasFiltradas = caracteristicas;
+    caracteristicaSeleccionada = null;
 
     // Helpers para distancias asociadas al productor
     final distanciasCamaFiltradas = await Boxes.distanciasCamaPorProductor(
@@ -121,10 +128,17 @@ class _CrearBoletaScreenState extends State<CrearBoletaScreen> {
           .where((v) => relaciones.contains(v.id))
           .toList();
       variedadProductores = boxVariedadProductor.values.toList();
-      /* distanciasCama = boxDistanciasCama.values.toList();
-      distanciasPlanta = boxDistanciasPlanta.values.toList();*/
       distanciasCama = distanciasCamaFiltradas;
       distanciasPlanta = distanciasPlantaFiltradas;
+
+      // cargar características desde Hive
+      caracteristicas = boxCaracteristicas.values
+          .where((c) => c.activo != false)
+          .toList();
+
+      // al inicio NO hay variedad seleccionada → no mostrar ninguna característica
+      caracteristicasFiltradas = [];
+      caracteristicaSeleccionada = null;
     });
   }
 
@@ -147,14 +161,6 @@ class _CrearBoletaScreenState extends State<CrearBoletaScreen> {
     });
   }
 
-  /// Calcula el área ya sembrada en la válvula seleccionada
-  double _areaSembradaEnValvula(int valvulaId) {
-    final boxBoletas = Hive.box<Boleta>('boletas');
-    return boxBoletas.values
-        .where((b) => b.valvulaId == valvulaId)
-        .fold(0.0, (sum, b) => sum + b.areaReal);
-  }
-
   Future<int> getCurrentUserId() async {
     final prefs = await SharedPreferences.getInstance();
     final email = prefs.getString('remembered_email');
@@ -163,6 +169,9 @@ class _CrearBoletaScreenState extends State<CrearBoletaScreen> {
   }
 
   Future<void> guardarBoleta() async {
+    if (_saving) return; // evita doble tap
+    setState(() => _saving = true);
+
     try {
       // Validación del formulario base
       if (!_formKey.currentState!.validate() ||
@@ -199,33 +208,36 @@ class _CrearBoletaScreenState extends State<CrearBoletaScreen> {
         );
         return;
       }
+
       if (areaParsed > max) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'El área no puede exceder el área de la válvula (${max.toStringAsFixed(2)})',
+              'El área no puede ser mayor que el área de la válvula (${max.toStringAsFixed(2)})',
             ),
           ),
         );
         return;
       }
 
-      // ==== NUEVA VALIDACIÓN: suma de áreas ya sembradas ====
-      final areaYaSembrada = _areaSembradaEnValvula(valvulaSeleccionada!.id);
-      final areaTotal = areaYaSembrada + areaParsed;
-      if (areaTotal > max) {
-        final disponible = (max - areaYaSembrada).clamp(0, max);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Área excede el área disponible en la válvula. '
-              'Disponible: ${disponible.toStringAsFixed(2)}',
+      // NUEVA VALIDACIÓN: suma de áreas ya sembradas (ignorando polinizadores)
+      if (variedadSeleccionada == null ||
+          variedadSeleccionada!.esPolinizador == false) {
+        final areaUsada = _areaUsadaEnValvula(valvulaSeleccionada!.id);
+        final areaDisponible = valvulaSeleccionada!.area - areaUsada;
+        if (areaParsed > areaDisponible) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'El área excede el disponible en la válvula '
+                '(Disponible: ${areaDisponible.toStringAsFixed(2)})',
+              ),
             ),
-          ),
-        );
-        return;
+          );
+          //return 'El área excede el disponible en la válvula (Disponible: ${areaDisponible.toStringAsFixed(2)})';
+          return;
+        }
       }
-
       final boxBoletas = Hive.box<Boleta>('boletas');
       final userId = await getCurrentUserId();
 
@@ -239,17 +251,17 @@ class _CrearBoletaScreenState extends State<CrearBoletaScreen> {
         distanciaPlanta: distanciaPlantaSeleccionada!.valor,
         variedad: variedadSeleccionada!.nombre,
         variedadId: variedadSeleccionada!.id,
-        areaReal: areaParsed, // <-- usa el valor ya parseado y validado
-        fechaSiembra: (fechaSiembra ?? DateTime.now()), // 👈 nunca null
+        areaReal: areaParsed,
+        fechaSiembra: (fechaSiembra ?? DateTime.now()),
         createdBy: userId,
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
         lotesSemilla: _lotesSemillaController.text,
+        caracteristicaId: caracteristicaSeleccionada?.id,
       );
 
       await boxBoletas.add(nuevaBoleta);
 
-      // Encola para enviar al server y trata de sincronizar si hay Internet
       await OutboxService.enqueueBoleta(nuevaBoleta);
       await OutboxService.trySyncAll();
 
@@ -265,6 +277,10 @@ class _CrearBoletaScreenState extends State<CrearBoletaScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Error al guardar boleta: $e')));
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
     }
   }
 
@@ -361,6 +377,23 @@ class _CrearBoletaScreenState extends State<CrearBoletaScreen> {
                 onChanged: (variedad) {
                   setState(() {
                     variedadSeleccionada = variedad;
+                    caracteristicaSeleccionada =
+                        null; // limpiar selección al cambiar variedad
+
+                    if (variedad == null) {
+                      // sin variedad: no mostrar nada
+                      caracteristicasFiltradas = [];
+                    } else if (variedad.esPolinizador == true) {
+                      // SOLO tipo POLINIZADOR_RATIO
+                      caracteristicasFiltradas = caracteristicas
+                          .where((c) => c.tipo == 'POLINIZADOR_RATIO')
+                          .toList();
+                    } else {
+                      // variedad NO polinizadora: quitar POLINIZADOR_RATIO
+                      caracteristicasFiltradas = caracteristicas
+                          .where((c) => c.tipo != 'POLINIZADOR_RATIO')
+                          .toList();
+                    }
                   });
                 },
                 validator: (value) =>
@@ -415,50 +448,84 @@ class _CrearBoletaScreenState extends State<CrearBoletaScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-              DropdownButtonFormField<DistanciaCama>(
-                decoration: const InputDecoration(labelText: 'Distancia Cama'),
-                value: distanciaCamaSeleccionada,
-                items: distanciasCama
-                    .map(
-                      (d) => DropdownMenuItem(
-                        value: d,
-                        child: Text(d.valor.toString()),
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<DistanciaCama>(
+                      decoration: const InputDecoration(
+                        labelText: 'Dist. Cama (cm)',
                       ),
-                    )
-                    .toList(),
-                onChanged: (d) {
-                  setState(() {
-                    distanciaCamaSeleccionada = d;
-                  });
-                },
-                validator: (value) =>
-                    value == null ? 'Seleccione una distancia de cama' : null,
+                      value: distanciaCamaSeleccionada,
+                      items: distanciasCama
+                          .map(
+                            (d) => DropdownMenuItem(
+                              value: d,
+                              child: Text(d.valor.toString()),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (d) {
+                        setState(() {
+                          distanciaCamaSeleccionada = d;
+                        });
+                      },
+                      validator: (value) => value == null
+                          ? 'Seleccione una distancia de cama'
+                          : null,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: DropdownButtonFormField<DistanciaPlanta>(
+                      decoration: const InputDecoration(
+                        labelText: 'Dist. Planta (cm)',
+                      ),
+                      value: distanciaPlantaSeleccionada,
+                      items: distanciasPlanta
+                          .map(
+                            (d) => DropdownMenuItem(
+                              value: d,
+                              child: Text(d.valor.toString()),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (d) {
+                        setState(() {
+                          distanciaPlantaSeleccionada = d;
+                        });
+                      },
+                      validator: (value) => value == null
+                          ? 'Seleccione una distancia de planta'
+                          : null,
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 16),
-
-              DropdownButtonFormField<DistanciaPlanta>(
+              // Característica de siembra
+              DropdownButtonFormField<CaracteristicaSiembra>(
                 decoration: const InputDecoration(
-                  labelText: 'Distancia Planta',
+                  labelText: 'Característica de siembra',
                 ),
-                value: distanciaPlantaSeleccionada,
-                items: distanciasPlanta
+                value: caracteristicaSeleccionada,
+                items: caracteristicasFiltradas
                     .map(
-                      (d) => DropdownMenuItem(
-                        value: d,
-                        child: Text(d.valor.toString()),
+                      (c) => DropdownMenuItem(
+                        value: c,
+                        child: Text('${c.nombre} '),
                       ),
                     )
                     .toList(),
-                onChanged: (d) {
+                onChanged: (c) {
                   setState(() {
-                    distanciaPlantaSeleccionada = d;
+                    caracteristicaSeleccionada = c;
                   });
                 },
-                validator: (value) =>
-                    value == null ? 'Seleccione una distancia de planta' : null,
+                // Si quieres que sea opcional, no pongas validator
+                // validator: (value) =>
+                //     value == null ? 'Seleccione una característica' : null,
               ),
               const SizedBox(height: 16),
-
               // ===== CAMPO ÁREA con inputFormatters y validator =====
               TextFormField(
                 controller: _areaController,
@@ -489,6 +556,23 @@ class _CrearBoletaScreenState extends State<CrearBoletaScreen> {
                   }
                   if (area > max) {
                     return 'No puede ser mayor al área de la válvula (${max.toStringAsFixed(2)})';
+                  }
+
+                  if (variedadSeleccionada == null ||
+                      variedadSeleccionada!.esPolinizador == false) {
+                    final areaIngresada = double.parse(
+                      _areaController.text.replaceAll(',', '.'),
+                    );
+
+                    final areaUsada = _areaUsadaEnValvula(
+                      valvulaSeleccionada!.id,
+                    );
+                    final areaDisponible =
+                        valvulaSeleccionada!.area - areaUsada;
+
+                    if (areaIngresada > areaDisponible) {
+                      return 'Área excede el disponible en válvula (Disponible: ${areaDisponible.toStringAsFixed(2)})';
+                    }
                   }
                   return null;
                 },
@@ -521,13 +605,48 @@ class _CrearBoletaScreenState extends State<CrearBoletaScreen> {
               const SizedBox(height: 24),
 
               ElevatedButton(
-                onPressed: guardarBoleta,
-                child: const Text('Guardar Boleta'),
+                onPressed: _saving ? null : guardarBoleta,
+                child: _saving
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Guardar Boleta'),
               ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  double _areaUsadaEnValvula(int valvulaId, {int? excluirBoletaId}) {
+    final boxBoletas = Hive.box<Boleta>('boletas');
+    final boxVariedades = Hive.box<Variedad>('variedades');
+
+    double sum = 0.0;
+
+    for (final b in boxBoletas.values) {
+      if (b.valvulaId != valvulaId) continue;
+
+      // 👉 En edición, excluir la boleta actual
+      if (excluirBoletaId != null && b.id == excluirBoletaId) continue;
+
+      try {
+        final variedad = boxVariedades.values.firstWhere(
+          (v) => v.id == b.variedadId,
+          orElse: () => Variedad(id: -1, nombre: '', esPolinizador: false),
+        );
+        // 👉 Polinizadores NO consumen área
+        if (variedad.esPolinizador == true) continue;
+      } catch (_) {
+        // compatibilidad hacia atrás
+      }
+
+      sum += b.areaReal;
+    }
+
+    return sum;
   }
 }

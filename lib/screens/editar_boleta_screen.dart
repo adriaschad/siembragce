@@ -10,6 +10,7 @@ import '../models/variedad.dart';
 import '../models/distancia_cama.dart';
 import '../models/distancia_planta.dart';
 import '../services/outbox_service.dart';
+import '../models/caracteristica_siembra.dart';
 
 class EditarBoletaScreen extends StatefulWidget {
   final Boleta boleta;
@@ -47,6 +48,9 @@ class _EditarBoletaScreenState extends State<EditarBoletaScreen> {
   List<Variedad> variedades = [];
   List<DistanciaCama> distanciasCama = [];
   List<DistanciaPlanta> distanciasPlanta = [];
+  List<CaracteristicaSiembra> caracteristicas = [];
+  List<CaracteristicaSiembra> caracteristicasFiltradas = [];
+  CaracteristicaSiembra? caracteristicaSeleccionada;
 
   Finca? fincaSeleccionada;
   Lote? loteSeleccionado;
@@ -75,6 +79,9 @@ class _EditarBoletaScreenState extends State<EditarBoletaScreen> {
     final boxDistCama = await Hive.openBox<DistanciaCama>('distancias_cama');
     final boxDistPlanta = await Hive.openBox<DistanciaPlanta>(
       'distancias_planta',
+    );
+    final boxCaracteristicas = await Hive.openBox<CaracteristicaSiembra>(
+      'caracteristicas_siembra',
     );
 
     final b = widget.boleta;
@@ -135,6 +142,47 @@ class _EditarBoletaScreenState extends State<EditarBoletaScreen> {
     ); // legible para usuario
     fechaSiembra = b.fechaSiembra;
     _lotesSemillaController.text = b.lotesSemilla ?? '';
+
+    print('DEBUG editar: boleta.caracteristicaId = ${b.caracteristicaId}');
+    // ---- Características de siembra ----
+    caracteristicas = boxCaracteristicas.values
+        .where((c) => c.activo != false)
+        .toList();
+
+    // Selección inicial según boleta.caracteristicaId
+    if (b.caracteristicaId != null) {
+      try {
+        caracteristicaSeleccionada = caracteristicas.firstWhere(
+          (c) => c.id == b.caracteristicaId,
+        );
+      } catch (_) {
+        caracteristicaSeleccionada = null;
+      }
+    } else {
+      caracteristicaSeleccionada = null;
+    }
+
+    // Filtrar según variedad actual (polinizador / no polinizador)
+    if (variedadSeleccionada == null) {
+      caracteristicasFiltradas = [];
+    } else if (variedadSeleccionada!.esPolinizador == true) {
+      caracteristicasFiltradas = caracteristicas
+          .where((c) => c.tipo == 'POLINIZADOR_RATIO')
+          .toList();
+    } else {
+      caracteristicasFiltradas = caracteristicas
+          .where((c) => c.tipo != 'POLINIZADOR_RATIO')
+          .toList();
+    }
+
+    // Si la selección actual no está en las filtradas, límpiala
+    if (caracteristicaSeleccionada != null &&
+        !caracteristicasFiltradas.any(
+          (c) => c.id == caracteristicaSeleccionada!.id,
+        )) {
+      caracteristicaSeleccionada = null;
+    }
+
     setState(() {});
   }
 
@@ -148,12 +196,31 @@ class _EditarBoletaScreenState extends State<EditarBoletaScreen> {
       valvulaSeleccionada?.area; // el campo en BD es 'area'
 
   /// Calcula el área ya sembrada en la válvula seleccionada
+  /// Ignora boletas cuya variedad local esté marcada como polinizador.
   double _areaSembradaEnValvula(int valvulaId) {
     final boxBoletas = Hive.box<Boleta>('boletas');
-    return boxBoletas.values
-        .where((b) => b.valvulaId == valvulaId)
-        .where((b) => b.id != widget.boleta.id) // excluye la boleta actual
-        .fold(0.0, (sum, b) => sum + b.areaReal);
+    final boxVariedades = Hive.box<Variedad>('variedades');
+    double sum = 0.0;
+    for (final b in boxBoletas.values) {
+      if (b.valvulaId != valvulaId) continue;
+      if (b.id == widget.boleta.id) continue; // excluye la boleta actual
+      try {
+        final varId = b.variedadId;
+        final variedadLocal = boxVariedades.values.firstWhere(
+          (v) => v.id == varId,
+          orElse: () => Variedad(id: -1, nombre: '', esPolinizador: false),
+        );
+        final esPol = variedadLocal.esPolinizador;
+        if (esPol == true) {
+          // ignorar polinizadores para sumas de área
+          continue;
+        }
+      } catch (_) {
+        // si no encontramos variedad, asumimos no-polinizador
+      }
+      sum += b.areaReal;
+    }
+    return sum;
   }
 
   Future<void> _cambiarFinca(Finca? finca) async {
@@ -235,20 +302,24 @@ class _EditarBoletaScreenState extends State<EditarBoletaScreen> {
       return;
     }
 
-    // ==== NUEVA VALIDACIÓN: suma de áreas ya sembradas ====
-    final areaYaSembrada = _areaSembradaEnValvula(valvulaSeleccionada!.id);
-    final areaTotal = areaYaSembrada + areaParsed;
-    if (areaTotal > max) {
-      final disponible = (max - areaYaSembrada).clamp(0, max);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Área excede el área disponible en la válvula. '
-            'Disponible: ${disponible.toStringAsFixed(2)}',
+    // NUEVA VALIDACIÓN: suma de áreas ya sembradas (ignorando polinizadores)
+    if (variedadSeleccionada == null ||
+        variedadSeleccionada!.esPolinizador == false) {
+      final areaYaSembrada = _areaSembradaEnValvula(valvulaSeleccionada!.id);
+      final areaTotal = areaYaSembrada + areaParsed;
+
+      if (areaTotal > max) {
+        final disponible = (max - areaYaSembrada).clamp(0, max);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Área excede el área disponible en la válvula. '
+              'Disponible: ${disponible.toStringAsFixed(2)}',
+            ),
           ),
-        ),
-      );
-      return;
+        );
+        return;
+      }
     }
 
     try {
@@ -265,7 +336,8 @@ class _EditarBoletaScreenState extends State<EditarBoletaScreen> {
         ..areaReal = areaParsed
         ..fechaSiembra = fechaSiembra!
         ..updatedAt = DateTime.now()
-        ..lotesSemilla = _lotesSemillaController.text.trim();
+        ..lotesSemilla = _lotesSemillaController.text.trim()
+        ..caracteristicaId = caracteristicaSeleccionada?.id;
       await b.save(); // Guarda en Hive
 
       // Encolar para sincronización (usa updateOrCreate por client_uuid en backend)
@@ -371,8 +443,24 @@ class _EditarBoletaScreenState extends State<EditarBoletaScreen> {
                             ),
                           )
                           .toList(),
-                      onChanged: (variedad) =>
-                          setState(() => variedadSeleccionada = variedad),
+                      onChanged: (variedad) {
+                        setState(() {
+                          variedadSeleccionada = variedad;
+                          caracteristicaSeleccionada = null;
+
+                          if (variedad == null) {
+                            caracteristicasFiltradas = [];
+                          } else if (variedad.esPolinizador == true) {
+                            caracteristicasFiltradas = caracteristicas
+                                .where((c) => c.tipo == 'POLINIZADOR_RATIO')
+                                .toList();
+                          } else {
+                            caracteristicasFiltradas = caracteristicas
+                                .where((c) => c.tipo != 'POLINIZADOR_RATIO')
+                                .toList();
+                          }
+                        });
+                      },
                       validator: (v) =>
                           v == null ? 'Seleccione una variedad' : null,
                     ),
@@ -428,49 +516,81 @@ class _EditarBoletaScreenState extends State<EditarBoletaScreen> {
                     ),
                     const SizedBox(height: 8),
 
-                    // Distancia Cama
-                    DropdownButtonFormField<DistanciaCama>(
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<DistanciaCama>(
+                            decoration: const InputDecoration(
+                              labelText: 'Dist. Cama (cm)',
+                            ),
+                            value: distanciaCamaSeleccionada,
+                            items: distanciasCama
+                                .map(
+                                  (d) => DropdownMenuItem(
+                                    value: d,
+                                    child: Text(d.valor.toString()),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (d) {
+                              setState(() {
+                                distanciaCamaSeleccionada = d;
+                              });
+                            },
+                            validator: (v) => v == null
+                                ? 'Seleccione una distancia de cama'
+                                : null,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: DropdownButtonFormField<DistanciaPlanta>(
+                            decoration: const InputDecoration(
+                              labelText: 'Dist. Planta (cm)',
+                            ),
+                            value: distanciaPlantaSeleccionada,
+                            items: distanciasPlanta
+                                .map(
+                                  (d) => DropdownMenuItem(
+                                    value: d,
+                                    child: Text(d.valor.toString()),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (d) {
+                              setState(() {
+                                distanciaPlantaSeleccionada = d;
+                              });
+                            },
+                            validator: (v) => v == null
+                                ? 'Seleccione una distancia de planta'
+                                : null,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    // Característica de siembra
+                    DropdownButtonFormField<CaracteristicaSiembra>(
                       decoration: const InputDecoration(
-                        labelText: 'Distancia Cama',
+                        labelText: 'Característica de siembra',
                       ),
-                      value: distanciaCamaSeleccionada,
-                      items: distanciasCama
+                      value: caracteristicaSeleccionada,
+                      items: caracteristicasFiltradas
                           .map(
-                            (d) => DropdownMenuItem(
-                              value: d,
-                              child: Text(d.valor.toString()),
+                            (c) => DropdownMenuItem(
+                              value: c,
+                              child: Text('${c.nombre} '),
                             ),
                           )
                           .toList(),
-                      onChanged: (d) =>
-                          setState(() => distanciaCamaSeleccionada = d),
-                      validator: (v) =>
-                          v == null ? 'Seleccione una distancia de cama' : null,
+                      onChanged: (c) {
+                        setState(() {
+                          caracteristicaSeleccionada = c;
+                        });
+                      },
                     ),
                     const SizedBox(height: 16),
-
-                    // Distancia Planta
-                    DropdownButtonFormField<DistanciaPlanta>(
-                      decoration: const InputDecoration(
-                        labelText: 'Distancia Planta',
-                      ),
-                      value: distanciaPlantaSeleccionada,
-                      items: distanciasPlanta
-                          .map(
-                            (d) => DropdownMenuItem(
-                              value: d,
-                              child: Text(d.valor.toString()),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (d) =>
-                          setState(() => distanciaPlantaSeleccionada = d),
-                      validator: (v) => v == null
-                          ? 'Seleccione una distancia de planta'
-                          : null,
-                    ),
-                    const SizedBox(height: 16),
-
                     // Área
                     TextFormField(
                       controller: _areaCtrl,

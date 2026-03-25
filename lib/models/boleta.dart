@@ -29,13 +29,27 @@ class Boleta extends HiveObject {
   @HiveField(10)
   int createdBy;
   @HiveField(11)
-  int? variedadId; // 👈 nuevo campo
+  int? variedadId;
   @HiveField(12)
   DateTime? createdAt;
   @HiveField(13)
   DateTime? updatedAt;
   @HiveField(14)
-  String? lotesSemilla; // <--- NUEVO CAMPO
+  String? lotesSemilla;
+  @HiveField(15)
+  int? cicloPromedio;
+  @HiveField(16)
+  bool? notif32Enviada; // notificación de día 32 enviada
+  @HiveField(17)
+  bool? notif50Enviada;
+  @HiveField(18)
+  String? clientUuid;
+  @HiveField(19)
+  int? caracteristicaId;
+  @HiveField(20)
+  String? caracteristicaNombre;
+  @HiveField(21)
+  String? caracteristicaTipo;
 
   Boleta({
     required this.id,
@@ -53,5 +67,12 @@ class Boleta extends HiveObject {
     required this.createdAt,
     required this.updatedAt,
     this.lotesSemilla,
+    this.cicloPromedio,
+    this.notif32Enviada,
+    this.notif50Enviada,
+    this.clientUuid,
+    this.caracteristicaId,
+    this.caracteristicaNombre,
+    this.caracteristicaTipo,
   });
 }

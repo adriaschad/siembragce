@@ -1,38 +1,44 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
 
-part of 'variedad.dart';
+part of 'caracteristica_siembra.dart';
 
 // **************************************************************************
 // TypeAdapterGenerator
 // **************************************************************************
 
-class VariedadAdapter extends TypeAdapter<Variedad> {
+class CaracteristicaSiembraAdapter extends TypeAdapter<CaracteristicaSiembra> {
   @override
-  final int typeId = 4;
+  final int typeId = 43;
 
   @override
-  Variedad read(BinaryReader reader) {
+  CaracteristicaSiembra read(BinaryReader reader) {
     final numOfFields = reader.readByte();
     final fields = <int, dynamic>{
       for (int i = 0; i < numOfFields; i++) reader.readByte(): reader.read(),
     };
-    return Variedad(
+    return CaracteristicaSiembra(
       id: fields[0] as int,
       nombre: fields[1] as String,
-      esPolinizador: fields[2] as bool,
+      tipo: fields[2] as String,
+      ratioN: fields[3] as int?,
+      activo: fields[4] as bool?,
     );
   }
 
   @override
-  void write(BinaryWriter writer, Variedad obj) {
+  void write(BinaryWriter writer, CaracteristicaSiembra obj) {
     writer
-      ..writeByte(3)
+      ..writeByte(5)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
       ..write(obj.nombre)
       ..writeByte(2)
-      ..write(obj.esPolinizador);
+      ..write(obj.tipo)
+      ..writeByte(3)
+      ..write(obj.ratioN)
+      ..writeByte(4)
+      ..write(obj.activo);
   }
 
   @override
@@ -41,7 +47,7 @@ class VariedadAdapter extends TypeAdapter<Variedad> {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is VariedadAdapter &&
+      other is CaracteristicaSiembraAdapter &&
           runtimeType == other.runtimeType &&
           typeId == other.typeId;
 }

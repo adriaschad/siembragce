@@ -10,5 +10,13 @@ class Variedad extends HiveObject {
   @HiveField(1)
   String nombre;
 
-  Variedad({required this.id, required this.nombre});
+  // Nuevo campo: si esta variedad es polinizador (no contar su área en totales)
+  @HiveField(2)
+  bool esPolinizador;
+
+  Variedad({
+    required this.id,
+    required this.nombre,
+    this.esPolinizador = false,
+  });
 }

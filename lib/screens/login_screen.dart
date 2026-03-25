@@ -4,6 +4,7 @@ import '../services/api_service.dart';
 import '../services/sync_service.dart';
 import '../services/outbox_service.dart';
 import '../services/auth_service.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 //import '../services/inbox_service.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -20,11 +21,27 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _loading = false;
   bool _obscure = true;
   String? _error;
+  String _versionLabel = '';
 
   @override
   void initState() {
     super.initState();
     _loadRememberedEmail();
+    _loadVersion(); // <- nuevo
+  }
+
+  Future<void> _loadVersion() async {
+    try {
+      setState(() {
+        // ejemplo: "v1.2.3 (build 5)"
+        _versionLabel = 'Versión 2 (build 4)';
+      });
+    } catch (_) {
+      // si algo falla, no rompemos la pantalla
+      setState(() {
+        _versionLabel = '';
+      });
+    }
   }
 
   @override
@@ -259,6 +276,17 @@ class _LoginScreenState extends State<LoginScreen> {
                             style: theme.textTheme.bodySmall,
                           ),
                         ),
+                        const SizedBox(height: 16),
+
+                        if (_versionLabel.isNotEmpty)
+                          Opacity(
+                            opacity: 0.6,
+                            child: Text(
+                              _versionLabel,
+                              textAlign: TextAlign.center,
+                              style: theme.textTheme.bodySmall,
+                            ),
+                          ),
                       ],
                     ),
                   ),

@@ -6,6 +6,7 @@ import '../services/api_service.dart';
 
 class InboxService {
   static const _inboxName = 'inbox_boletas';
+  static const _inboxInvernadero = 'inbox_boletas_invernadero';
 
   // Descargar boletas del servidor y guardarlas localmente evitando duplicados.
   static Future<void> syncFromServer() async {
@@ -34,14 +35,50 @@ class InboxService {
       }
       await box.flush();
 
-      debugPrint('[INBOX] Descargadas $newCount nuevas boletas.');
+      //debugPrint('[INBOX] Descargadas $newCount nuevas boletas.');
     } catch (e) {
       debugPrint('[INBOX] Error al sincronizar: $e');
+    }
+  }
+
+  // NUEVO: sync boletas invernadero (dinámico)
+  static Future<void> syncBoletasInvernaderoFromServer() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('user_token');
+    if (token == null || token.isEmpty) {
+      debugPrint('[INBOX-INVERNADERO] No token → skip sync');
+      return;
+    }
+
+    try {
+      final List<dynamic> serverBoletas =
+          await ApiService.get('/api/boletas_invernadero', token: token)
+              as List<dynamic>;
+
+      final box = await _openInboxInvernadero();
+      final localIds = box.keys.toSet();
+
+      int newCount = 0;
+      for (final b in serverBoletas) {
+        final serverId = b['id'].toString();
+        if (!localIds.contains(serverId)) {
+          await box.put(serverId, b);
+          newCount++;
+        }
+      }
+      await box.flush();
+    } catch (e) {
+      debugPrint('[INBOX-INVERNADERO] Error al sincronizar: $e');
     }
   }
 
   static Future<Box> _openInbox() async {
     if (Hive.isBoxOpen(_inboxName)) return Hive.box(_inboxName);
     return Hive.openBox(_inboxName); // dinámica (Map)
+  }
+
+  static Future<Box> _openInboxInvernadero() async {
+    if (Hive.isBoxOpen(_inboxInvernadero)) return Hive.box(_inboxInvernadero);
+    return Hive.openBox(_inboxInvernadero); // dinámica (Map)
   }
 }

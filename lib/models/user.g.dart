@@ -27,13 +27,14 @@ class UserAdapter extends TypeAdapter<User> {
       rememberToken: fields[7] as String?,
       createdAt: fields[8] as String?,
       updatedAt: fields[9] as String?,
+      canCreateInvernadero: fields[10] as bool,
     );
   }
 
   @override
   void write(BinaryWriter writer, User obj) {
     writer
-      ..writeByte(10)
+      ..writeByte(11)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -53,7 +54,9 @@ class UserAdapter extends TypeAdapter<User> {
       ..writeByte(8)
       ..write(obj.createdAt)
       ..writeByte(9)
-      ..write(obj.updatedAt);
+      ..write(obj.updatedAt)
+      ..writeByte(10)
+      ..write(obj.canCreateInvernadero);
   }
 
   @override

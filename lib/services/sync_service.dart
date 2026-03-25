@@ -13,9 +13,11 @@ import '../models/variedad_productor.dart';
 import '../models/distancia_cama.dart';
 import '../models/distancia_planta.dart';
 import '../models/boleta.dart';
+import '../models/boleta_invernadero.dart';
 //import '../models/configuracion.dart';
 import '../models/productor_distancia_cama.dart';
 import '../models/productor_distancia_planta.dart';
+import '../models/caracteristica_siembra.dart';
 
 class SyncService {
   /// Entrada principal
@@ -79,10 +81,30 @@ class SyncService {
         path: '/api/variedades',
         boxName: 'variedades',
         token: token,
-        fromMap: (m) => Variedad(
-          id: _asInt(m['id']),
-          nombre: (m['nombre'] ?? m['name'] ?? '').toString(),
-        ),
+        fromMap: (m) {
+          final raw = m['es_polinizador'];
+
+          bool esPolinizador;
+          if (raw is bool) {
+            esPolinizador = raw;
+          } else if (raw is num) {
+            esPolinizador = raw == 1;
+          } else if (raw is String) {
+            esPolinizador = raw == '1' || raw.toLowerCase() == 'true';
+          } else {
+            esPolinizador = false;
+          }
+
+          // 👇 Debug: imprime el mapa completo y el valor calculado
+          // debugPrint('Variedad JSON: $m');
+          // debugPrint(' -> es_polinizador raw: $raw, parsed: $esPolinizador');
+
+          return Variedad(
+            id: _asInt(m['id']),
+            nombre: (m['nombre'] ?? m['name'] ?? '').toString(),
+            esPolinizador: esPolinizador,
+          );
+        },
       ),
       'variedades',
     );
@@ -139,6 +161,7 @@ class SyncService {
         query: qpPid,
         fromMap: (m) => Boleta(
           id: _asInt(m['id']),
+          clientUuid: m['client_uuid']?.toString(),
           productorId: _asInt(m['productor_id']),
           fincaId: _asInt(m['finca_id']),
           loteId: _asInt(m['lote_id']),
@@ -153,21 +176,68 @@ class SyncService {
           createdAt: DateTime.tryParse(m['created_at'] ?? ''),
           updatedAt: DateTime.tryParse(m['updated_at'] ?? ''),
           lotesSemilla: (m['lotes_semilla'] ?? m['lotesSemilla'] ?? '')
-              .toString(), // <--- mapeo nuevo
+              .toString(),
+          cicloPromedio: m['ciclo_promedio'] != null
+              ? _asInt(m['ciclo_promedio'])
+              : null,
+          caracteristicaId: m['caracteristica_id'] != null
+              ? _asInt(m['caracteristica_id'])
+              : null,
         ),
       ),
       'boletas',
     );
 
-    /*await _safeSync(
-      () => _syncTypedCollection<Configuracion>(
-        path: '/api/configuraciones',
-        boxName: 'configuraciones',
+    // NUEVO: sincronizar boletas de INVERNADERO
+    await _safeSync(
+      () => _syncTypedCollection<BoletaInvernadero>(
+        path: '/api/boletas_invernadero',
+        boxName: 'boletas_invernadero',
         token: token,
-        fromMap: (m) => Configuracion.fromMap(m),
+        query: qpPid,
+        fromMap: (m) => BoletaInvernadero(
+          id: _asInt(m['id']),
+          productorId: _asInt(m['productor_id']),
+          fincaId: _asInt(m['finca_id']),
+          loteId: _asInt(m['lote_id']),
+          valvulaId: _asInt(m['valvula_id']),
+          variedad: (m['variedad_nombre'] ?? m['variedad'] ?? '').toString(),
+          variedadId: _asInt(m['variedad_id']),
+          cantidadBandejas: _asInt(m['cantidad_bandejas']),
+          fechaSiembra:
+              DateTime.tryParse(m['fecha_siembra'] ?? '') ?? DateTime.now(),
+          fechaTransplante: m['fecha_transplante'] != null
+              ? DateTime.tryParse(m['fecha_transplante'])
+              : null,
+          lotesSemilla: (m['lotes_semilla'] ?? m['lotesSemilla'] ?? '')
+              .toString(),
+          area: _asDouble(m['area'] ?? m['area_real']),
+          createdBy: _asInt(m['created_by'] ?? m['createdBy']),
+          createdAt: DateTime.tryParse(m['created_at'] ?? ''),
+          updatedAt: DateTime.tryParse(m['updated_at'] ?? ''),
+        ),
       ),
-      'configuraciones',
-    );*/
+      'boletas_invernadero',
+    );
+
+    await _safeSync(
+      () => _syncTypedCollection<CaracteristicaSiembra>(
+        path: '/api/caracteristicas_siembra', // ajusta si tu ruta es distinta
+        boxName: 'caracteristicas_siembra',
+        token: token,
+        fromMap: (m) => CaracteristicaSiembra(
+          id: _asInt(m['id']),
+          nombre: (m['nombre'] ?? '').toString(),
+          tipo: (m['tipo'] ?? '')
+              .toString(), // 'PATRON_SEMILLAS' o 'POLINIZADOR_RATIO'
+          ratioN: m['ratio_n'] != null ? _asInt(m['ratio_n']) : null,
+          activo: m['activo'] is bool
+              ? m['activo'] as bool
+              : (m['activo'] is num ? (m['activo'] as num) == 1 : true),
+        ),
+      ),
+      'caracteristicas_siembra',
+    );
 
     await _safeSync(
       () => _syncTypedCollection<ProductorDistanciaCama>(
@@ -202,7 +272,7 @@ class SyncService {
   ) async {
     try {
       await task();
-      debugPrint('[SYNC] $name OK');
+      //debugPrint('[SYNC] $name OK');
     } on ApiException catch (e) {
       if (e.statusCode == 401) rethrow;
       debugPrint('[SYNC] $name ApiException ${e.statusCode}: ${e.message}');
@@ -219,13 +289,18 @@ class SyncService {
     Map<String, String>? query,
     String Function(Map<String, dynamic> map, int index)? keyFor,
   }) async {
-    debugPrint('[SYNC] Fetch $path query=$query');
+    //debugPrint('[SYNC] Fetch $path query=$query');
     final List<dynamic> all = await _fetchAll(
       path: path,
       token: token,
       query: query,
     );
-    debugPrint('[SYNC] $boxName received ${all.length} items');
+    //debugPrint('[SYNC] $boxName received ${all.length} items');
+
+    if (boxName == 'boletas' && all.isNotEmpty) {
+      final first = all.first;
+      //debugPrint('[SYNC] boletas sample item: $first');
+    }
 
     final box = await _openTypedBox<T>(boxName);
     await box.clear();
@@ -265,12 +340,21 @@ class SyncService {
     while (true) {
       final q = {if (query != null) ...query, 'page': '$page'};
 
+      debugPrint('[SYNC] Fetch $path query=$q'); // 👈 ACTIVADO
+
       final resp = await ApiService.get(path, token: token, query: q);
 
       if (resp is List) {
         result
           ..clear()
           ..addAll(resp);
+
+        // 👇 log específico para características
+        if (path.contains('caracteristicas')) {
+          debugPrint(
+            '[SYNC] caracteristicas_siembra: recibidos ${result.length} items (formato lista simple)',
+          );
+        }
         break;
       } else if (resp is Map) {
         final data = resp['data'];
@@ -283,6 +367,11 @@ class SyncService {
               ? resp['current_page'] as int
               : page;
 
+          if (path.contains('caracteristicas')) {
+            debugPrint(
+              '[SYNC] caracteristicas_siembra: página $currentPage de $lastPage, +${data.length} items',
+            );
+          }
           if (lastPage != null) {
             if (currentPage >= lastPage) break;
           } else if (data.isEmpty) {
@@ -311,8 +400,7 @@ class SyncService {
   static Future<Box<T>> _openTypedBox<T>(String name) async {
     if (Hive.isBoxOpen(name)) {
       // Si ya está abierta con el tipo correcto, la reusamos.
-      final b = Hive.box(name);
-      return b as Box<T>;
+      return Hive.box<T>(name);
     }
     return Hive.openBox<T>(name);
   }

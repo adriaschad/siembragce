@@ -32,13 +32,20 @@ class BoletaAdapter extends TypeAdapter<Boleta> {
       createdAt: fields[12] as DateTime?,
       updatedAt: fields[13] as DateTime?,
       lotesSemilla: fields[14] as String?,
+      cicloPromedio: fields[15] as int?,
+      notif32Enviada: fields[16] as bool?,
+      notif50Enviada: fields[17] as bool?,
+      clientUuid: fields[18] as String?,
+      caracteristicaId: fields[19] as int?,
+      caracteristicaNombre: fields[20] as String?,
+      caracteristicaTipo: fields[21] as String?,
     );
   }
 
   @override
   void write(BinaryWriter writer, Boleta obj) {
     writer
-      ..writeByte(15)
+      ..writeByte(22)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -68,7 +75,21 @@ class BoletaAdapter extends TypeAdapter<Boleta> {
       ..writeByte(13)
       ..write(obj.updatedAt)
       ..writeByte(14)
-      ..write(obj.lotesSemilla);
+      ..write(obj.lotesSemilla)
+      ..writeByte(15)
+      ..write(obj.cicloPromedio)
+      ..writeByte(16)
+      ..write(obj.notif32Enviada)
+      ..writeByte(17)
+      ..write(obj.notif50Enviada)
+      ..writeByte(18)
+      ..write(obj.clientUuid)
+      ..writeByte(19)
+      ..write(obj.caracteristicaId)
+      ..writeByte(20)
+      ..write(obj.caracteristicaNombre)
+      ..writeByte(21)
+      ..write(obj.caracteristicaTipo);
   }
 
   @override

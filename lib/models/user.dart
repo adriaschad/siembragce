@@ -34,6 +34,9 @@ class User extends HiveObject {
   @HiveField(9)
   String? updatedAt;
 
+  @HiveField(10)
+  bool canCreateInvernadero;
+
   User({
     required this.id,
     required this.name,
@@ -45,5 +48,6 @@ class User extends HiveObject {
     this.rememberToken,
     this.createdAt,
     this.updatedAt,
+    this.canCreateInvernadero = false,
   });
 }

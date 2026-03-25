@@ -7,6 +7,8 @@ import '../models/distancia_cama.dart';
 import '../models/distancia_planta.dart';
 import '../models/productor_distancia_cama.dart';
 import '../models/productor_distancia_planta.dart';
+import '../models/boleta_invernadero.dart';
+import '../models/caracteristica_siembra.dart';
 
 class Boxes {
   static Future<Box<T>> open<T>(String name) async {
@@ -26,6 +28,23 @@ class Boxes {
       open<ProductorDistanciaCama>('productor_distancia_cama');
   static Future<Box<ProductorDistanciaPlanta>> productorDistanciaPlanta() =>
       open<ProductorDistanciaPlanta>('productor_distancia_planta');
+
+  // Boletas (siembra)
+  static Future<Box> boletas() => open('boletas');
+
+  // Nuevo: Boletas Invernadero (tipada)
+  static Future<Box<BoletaInvernadero>> boletasInvernadero() =>
+      open<BoletaInvernadero>('boletas_invernadero');
+
+  // Outbox helpers
+  static Future<Box> outboxBoletas() => open('outbox_boletas');
+
+  // Nuevo: outbox para boletas invernadero
+  static Future<Box> outboxBoletasInvernadero() =>
+      open('outbox_boletas_invernadero');
+
+  static Future<Box<CaracteristicaSiembra>> caracteristicasSiembra() =>
+      open<CaracteristicaSiembra>('caracteristicas_siembra');
 
   /// Helpers para obtener solo las distancias de cama asociadas a un productor
   static Future<List<DistanciaCama>> distanciasCamaPorProductor(

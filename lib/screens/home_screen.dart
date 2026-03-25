@@ -5,8 +5,13 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../models/boleta.dart';
 import '../models/variedad.dart';
 import '../services/outbox_service.dart';
+import '../services/harvest_notification_service.dart';
 
 import 'package:flutter/services.dart';
+
+import 'package:shared_preferences/shared_preferences.dart';
+import '../models/user.dart'; // asegura que existe el modelo Hive User
+import 'dart:convert';
 
 class HomeScreen extends StatefulWidget {
   final String? token;
@@ -26,11 +31,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   DateTime? _desde;
   DateTime? _hasta;
 
+  bool _userCanCreateInvernadero = false;
+
   // --- Helpers de saneo ---
   static bool _sanitizedOnce = false;
 
   // Mapa de id de variedad a nombre de variedad
   Map<int, String> _mapVariedades = {};
+
+  // Mapa id variedad -> esPolinizador
+  Map<int, bool> _isPolinizador = {};
 
   DateTime? _asDateTime(dynamic v) {
     if (v == null) return null;
@@ -117,6 +127,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final boxVariedades = await Hive.openBox<Variedad>('variedades');
     setState(() {
       _mapVariedades = {for (var v in boxVariedades.values) v.id: v.nombre};
+      _isPolinizador = {
+        for (var v in boxVariedades.values) v.id: (v.esPolinizador == true),
+      };
     });
   }
 
@@ -128,6 +141,89 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _cargarVariedades();
     WidgetsBinding.instance.addObserver(this);
     _initPeriodoPorDefecto();
+    _loadUserPermission();
+    HarvestNotificationService.checkAndNotify();
+  }
+
+  Future<void> _loadUserPermission() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      // 1) Intentar leer current_user guardado en login (fallback rápido)
+      final currentUserJson = prefs.getString('current_user');
+      if (currentUserJson != null && currentUserJson.isNotEmpty) {
+        try {
+          final Map<String, dynamic> u = Map<String, dynamic>.from(
+            jsonDecode(currentUserJson),
+          );
+          final can =
+              u['canCreateInvernadero'] ?? u['can_create_invernadero'] ?? false;
+          if (can == true || can == 1) {
+            setState(() => _userCanCreateInvernadero = true);
+            return;
+          }
+        } catch (e) {
+          debugPrint('[HOME] Error parsing current_user json: $e');
+          // seguir al siguiente chequeo
+        }
+      }
+
+      // 2) Legacy: si no hay current_user, intentamos por remembered_email + caja 'users'
+      final email = prefs.getString('remembered_email');
+      if (email == null) {
+        setState(() => _userCanCreateInvernadero = false);
+        return;
+      }
+      final userId = prefs.getInt_notnull('offline_userId_$email');
+
+      // Intenta leer la caja 'users' (si la sincronizas)
+      if (Hive.isBoxOpen('users')) {
+        final box = Hive.box('users');
+        // la caja puede contener objetos tipados o Map; soportamos ambos
+        for (final key in box.keys) {
+          final v = box.get(key);
+          if (v == null) continue;
+          try {
+            if (v is Map) {
+              if ((v['id'] ?? v['userId']) == userId) {
+                final can =
+                    v['can_create_invernadero'] ??
+                    v['canCreateInvernadero'] ??
+                    false;
+                setState(
+                  () => _userCanCreateInvernadero = (can == true || can == 1),
+                );
+                return;
+              }
+            } else {
+              // tipado (User Hive object)
+              if (v is User && v.id == userId) {
+                setState(
+                  () => _userCanCreateInvernadero =
+                      v.canCreateInvernadero == true,
+                );
+                return;
+              }
+              // si el objeto tiene id property por reflexión:
+              final idProp = (v as dynamic).id;
+              if (idProp != null && idProp == userId) {
+                final can = (v as dynamic).canCreateInvernadero ?? false;
+                setState(() => _userCanCreateInvernadero = (can == true));
+                return;
+              }
+            }
+          } catch (_) {
+            // ignore
+          }
+        }
+      }
+
+      // fallback: no encontrado => false
+      setState(() => _userCanCreateInvernadero = false);
+    } catch (e) {
+      debugPrint('[HOME] Error loading user permission: $e');
+      setState(() => _userCanCreateInvernadero = false);
+    }
   }
 
   @override
@@ -245,18 +341,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String _fmt(DateTime d) =>
       '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
 
-  /*String _fmtDateTime(DateTime? d) {
-    if (d == null) return 'N/D';
-    final h = d.hour.toString().padLeft(2, '0');
-    final m = d.minute.toString().padLeft(2, '0');
-    return '${_fmt(d)} $h:$m';
-  }*/
-
-  /*bool _isSameDay(DateTime? a, DateTime b) {
-    if (a == null) return false;
-    return a.year == b.year && a.month == b.month && a.day == b.day;
-  }*/
-
   @override
   Widget build(BuildContext context) {
     final args = ModalRoute.of(context)!.settings.arguments as Map?;
@@ -305,6 +389,130 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 final r = await Navigator.pushNamed(
                   context,
                   '/ver_boletas',
+                  arguments: {
+                    'token': widget.token,
+                    'productorId': widget.productorId,
+                  },
+                );
+                if (r == true && mounted) setState(() {});
+              },
+            ),
+            if (_userCanCreateInvernadero)
+              ExpansionTile(
+                leading: const Icon(Icons.park),
+                title: const Text('Boletas Invernadero'),
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.add_circle_outline),
+                    title: const Text('Crear Boleta Invernadero'),
+                    onTap: () async {
+                      final r = await Navigator.pushNamed(
+                        context,
+                        '/crear_boleta_invernadero',
+                        arguments: {
+                          'token': widget.token,
+                          'productorId': widget.productorId,
+                        },
+                      );
+                      if (r == true && mounted) setState(() {});
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.list_alt),
+                    title: const Text('Ver Boletas Invernadero'),
+                    onTap: () async {
+                      final r = await Navigator.pushNamed(
+                        context,
+                        '/ver_boletas_invernadero',
+                        arguments: {
+                          'token': widget.token,
+                          'productorId': widget.productorId,
+                        },
+                      );
+                      if (r == true && mounted) setState(() {});
+                    },
+                  ),
+                ],
+              ),
+            ExpansionTile(
+              leading: const Icon(Icons.science),
+              title: const Text('Boletas Muestreo'),
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.camera_alt),
+                  title: const Text('Crear Boleta Muestreo'),
+                  onTap: () async {
+                    final r = await Navigator.pushNamed(
+                      context,
+                      '/crear_boleta_muestreo',
+                      arguments: {
+                        'token': widget.token,
+                        'productorId': widget.productorId,
+                      },
+                    );
+                    if (r == true && mounted) setState(() {});
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.photo_library),
+                  title: const Text('Ver Boletas Muestreo'),
+                  onTap: () async {
+                    final r = await Navigator.pushNamed(
+                      context,
+                      '/ver_boletas_muestreo',
+                      arguments: {
+                        'token': widget.token,
+                        'productorId': widget.productorId,
+                      },
+                    );
+                    if (r == true && mounted) setState(() {});
+                  },
+                ),
+              ],
+            ),
+            ExpansionTile(
+              leading: const Icon(Icons.replay_circle_filled),
+              title: const Text('Boletas Resiembra'),
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.add_circle_outline),
+                  title: const Text('Crear Boleta Resiembra'),
+                  onTap: () async {
+                    final r = await Navigator.pushNamed(
+                      context,
+                      '/crear_boleta_resiembra',
+                      arguments: {
+                        'token': widget.token,
+                        'productorId': widget.productorId,
+                      },
+                    );
+                    if (r == true && mounted) setState(() {});
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.list_alt),
+                  title: const Text('Ver Boletas Resiembra'),
+                  onTap: () async {
+                    final r = await Navigator.pushNamed(
+                      context,
+                      '/ver_boletas_resiembra',
+                      arguments: {
+                        'token': widget.token,
+                        'productorId': widget.productorId,
+                      },
+                    );
+                    if (r == true && mounted) setState(() {});
+                  },
+                ),
+              ],
+            ),
+            ListTile(
+              leading: const Icon(Icons.agriculture),
+              title: const Text('Próximas cosechas'),
+              onTap: () async {
+                final r = await Navigator.pushNamed(
+                  context,
+                  '/proximas_cosechas',
                   arguments: {
                     'token': widget.token,
                     'productorId': widget.productorId,
@@ -390,22 +598,36 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       }).toList();
 
                       final totalBoletasRango = enRango.length;
-                      final double totalAreaRango = enRango.fold(
-                        0.0,
-                        (sum, bo) => sum + bo.areaReal,
-                      );
+
+                      // Sumar áreas excluyendo boletas cuya variedad sea polinizador
+                      double totalAreaRango = 0.0;
+                      for (final bo in enRango) {
+                        final vId = bo.variedadId;
+                        final isPol = vId != null
+                            ? (_isPolinizador[vId] ?? false)
+                            : false;
+                        if (!isPol) totalAreaRango += bo.areaReal;
+                      }
 
                       final totalBoletasAll = todas.length;
-                      final double totalAreaAll = todas.fold(
-                        0.0,
-                        (sum, bo) => sum + bo.areaReal,
-                      );
+
+                      double totalAreaAll = 0.0;
+                      for (final bo in todas) {
+                        final vId = bo.variedadId;
+                        final isPol = vId != null
+                            ? (_isPolinizador[vId] ?? false)
+                            : false;
+                        if (!isPol) totalAreaAll += bo.areaReal;
+                      }
 
                       // --- Agrupa por variedadId (y luego busca el nombre)
                       final Map<int, double> areaPorVariedad = {};
                       for (final bo in enRango) {
                         final vId = bo.variedadId;
                         if (vId == null) continue;
+                        final isPol = _isPolinizador[vId] ?? false;
+                        if (isPol)
+                          continue; // omitimos polinizadores en el chart de áreas
                         areaPorVariedad[vId] =
                             (areaPorVariedad[vId] ?? 0) + bo.areaReal;
                       }
@@ -743,6 +965,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 }
 
 // --------- Widgets de apoyo ---------
+// (el resto del archivo se mantiene igual)
 class _StatCard extends StatelessWidget {
   final String title;
   final Widget valueWidget;

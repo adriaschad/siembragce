@@ -1,7 +1,15 @@
 import 'dart:convert';
 import 'dart:async';
+
+import 'package:flutter/foundation.dart'; // debugPrint
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../config.dart';
 import 'package:http/http.dart' as http;
+
+import 'dart:io';
+import 'package:mime/mime.dart';
+import 'package:http_parser/http_parser.dart';
 
 class ApiException implements Exception {
   final String message;
@@ -12,7 +20,7 @@ class ApiException implements Exception {
 }
 
 class ApiService {
-  static const Duration _timeout = Duration(seconds: 15);
+  static const Duration _timeout = Duration(seconds: 20);
 
   static String get baseUrl => AppConfig.apiBaseUrl;
 
@@ -30,8 +38,8 @@ class ApiService {
   ) async {
     final uri = Uri.parse('$baseUrl/api/login');
 
-    print('[LOGIN] POST $uri');
-    print('[LOGIN] Body: {"email": "$email", "password": "***"}');
+    debugPrint('[LOGIN] POST $uri');
+    debugPrint('[LOGIN] Body: {"email": "$email", "password": "***"}');
     final resp = await http
         .post(
           uri,
@@ -40,8 +48,8 @@ class ApiService {
         )
         .timeout(_timeout);
 
-    print('[LOGIN] Status: ${resp.statusCode}');
-    print('[LOGIN] Response: ${resp.body}');
+    debugPrint('[LOGIN] Status: ${resp.statusCode}');
+    debugPrint('[LOGIN] Response: ${resp.body}');
 
     if (resp.statusCode == 200) {
       final data = jsonDecode(resp.body) as Map<String, dynamic>;
@@ -52,7 +60,42 @@ class ApiService {
             !user.containsKey('productorId')) {
           user['productorId'] = user['productor_id'];
         }
+        // Normalizar can_create_invernadero -> canCreateInvernadero (camelCase)
+        if (user.containsKey('can_create_invernadero') &&
+            !user.containsKey('canCreateInvernadero')) {
+          user['canCreateInvernadero'] = user['can_create_invernadero'];
+        }
       }
+
+      // Persistimos token + user en SharedPreferences para que HomeScreen pueda leerlo
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        // token
+        if (data.containsKey('token') && data['token'] is String) {
+          await prefs.setString('user_token', data['token'] as String);
+        }
+        // current_user json (guardamos el mapa normalizado)
+        if (data['user'] is Map<String, dynamic>) {
+          final userJson = jsonEncode(data['user']);
+          await prefs.setString('current_user', userJson);
+          // remembered email (ayuda a compatibilidad con offline_userId_ keys)
+          if ((data['user'] as Map<String, dynamic>).containsKey('email')) {
+            final remEmail =
+                (data['user'] as Map<String, dynamic>)['email'] as String?;
+            if (remEmail != null && remEmail.isNotEmpty) {
+              await prefs.setString('remembered_email', remEmail);
+              // guardamos offline_userId_<email> para compatibilidad con tu código
+              final uid = (data['user'] as Map<String, dynamic>)['id'];
+              if (uid is int) {
+                await prefs.setInt('offline_userId_$remEmail', uid);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('[LOGIN] Error persisting login data: $e');
+      }
+
       return data;
     }
 
@@ -76,7 +119,7 @@ class ApiService {
     final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
     final resp = await http
         .get(uri, headers: _jsonHeaders(token: token))
-        .timeout(const Duration(seconds: 20));
+        .timeout(_timeout);
 
     if (resp.statusCode >= 200 && resp.statusCode < 300) {
       return resp.body.isNotEmpty ? jsonDecode(resp.body) : null;
@@ -105,7 +148,7 @@ class ApiService {
           headers: _jsonHeaders(token: token),
           body: jsonEncode(body),
         )
-        .timeout(const Duration(seconds: 20));
+        .timeout(_timeout);
 
     if (resp.statusCode >= 200 && resp.statusCode < 300) {
       return resp.body.isNotEmpty ? jsonDecode(resp.body) : null;
@@ -121,99 +164,66 @@ class ApiService {
     );
   }
 
-  /*
-  static Future<List<dynamic>> getUsers(String token, int productorId) async {
-    final url = Uri.parse('$baseUrl/api/users?productor_id=$productorId');
-    final res = await http.get(url, headers: _headers(token));
-    if (res.statusCode == 200) {
-      return jsonDecode(res.body);
-    }
-    return [];
-  }
+  static Future<dynamic> postMultipart(
+    String path,
+    Map<String, dynamic> fields,
+    List<Map<String, String>> files, {
+    String? token,
+  }) async {
+    final uri = Uri.parse('$baseUrl$path');
+    final request = http.MultipartRequest('POST', uri);
 
-  static Future<List<dynamic>> getProductores(
-    String token,
-    int productorId,
-  ) async {
-    final url = Uri.parse('$baseUrl/api/productores?productor_id=$productorId');
-    final res = await http.get(url, headers: _headers(token));
-    if (res.statusCode == 200) {
-      return jsonDecode(res.body);
+    // Encabezados
+    request.headers['Accept'] = 'application/json';
+    if (token != null && token.isNotEmpty) {
+      request.headers['Authorization'] = 'Bearer $token';
     }
-    return [];
-  }
 
-  static Future<List<dynamic>> getFincas(String token, int productorId) async {
-    final url = Uri.parse('$baseUrl/api/fincas?productor_id=$productorId');
-    final res = await http.get(url, headers: _headers(token));
-    if (res.statusCode == 200) {
-      return jsonDecode(res.body);
-    }
-    return [];
-  }
+    // campos simples (stringify lists/maps)
+    fields.forEach((k, v) {
+      if (v == null) return;
+      if (v is String) {
+        request.fields[k] = v;
+      } else {
+        request.fields[k] = jsonEncode(v);
+      }
+    });
 
-  static Future<List<dynamic>> getLotes(String token, int productorId) async {
-    final url = Uri.parse('$baseUrl/api/lotes?productor_id=$productorId');
-    final res = await http.get(url, headers: _headers(token));
-    if (res.statusCode == 200) {
-      return jsonDecode(res.body);
+    for (final f in files) {
+      final pathStr = f['path'];
+      if (pathStr == null) continue;
+      final field = f['field'] ?? 'files[]';
+      final filename =
+          f['filename'] ?? pathStr.split(Platform.pathSeparator).last;
+      final file = File(pathStr);
+      if (!file.existsSync()) continue;
+      final mimeType = lookupMimeType(pathStr) ?? 'application/octet-stream';
+      final parts = mimeType.split('/');
+      final contentType = MediaType(
+        parts[0],
+        parts.length > 1 ? parts[1] : 'octet-stream',
+      );
+      request.files.add(
+        http.MultipartFile.fromBytes(
+          field,
+          file.readAsBytesSync(),
+          filename: filename,
+          contentType: contentType,
+        ),
+      );
     }
-    return [];
-  }
 
-  static Future<List<dynamic>> getValvulas(
-    String token,
-    int productorId,
-  ) async {
-    final url = Uri.parse('$baseUrl/api/valvulas?productor_id=$productorId');
-    final res = await http.get(url, headers: _headers(token));
-    if (res.statusCode == 200) {
-      return jsonDecode(res.body);
+    final streamed = await request.send().timeout(_timeout);
+    final resp = await http.Response.fromStream(streamed);
+    if (resp.statusCode >= 200 && resp.statusCode < 300) {
+      try {
+        return jsonDecode(resp.body);
+      } catch (_) {
+        return resp.body;
+      }
+    } else {
+      // lanzar excepción con el mismo esquema que el resto del ApiService
+      throw ApiException(resp.body, statusCode: resp.statusCode);
     }
-    return [];
   }
-
-  static Future<List<dynamic>> getVariedades(
-    String token,
-    int productorId,
-  ) async {
-    final url = Uri.parse('$baseUrl/api/variedades?productor_id=$productorId');
-    final res = await http.get(url, headers: _headers(token));
-    if (res.statusCode == 200) {
-      return jsonDecode(res.body);
-    }
-    return [];
-  }
-
-  static Future<List<dynamic>> getVariedadProductor(
-    String token,
-    int productorId,
-  ) async {
-    final url = Uri.parse(
-      '$baseUrl/api/variedad_productor?productor_id=$productorId',
-    );
-    final res = await http.get(url, headers: _headers(token));
-    if (res.statusCode == 200) {
-      return jsonDecode(res.body);
-    }
-    return [];
-  }
-
-  static Future<List<dynamic>> getDistanciasCama(String token) async {
-    final url = Uri.parse('$baseUrl/api/distancias_cama');
-    final res = await http.get(url, headers: _headers(token));
-    if (res.statusCode == 200) {
-      return jsonDecode(res.body);
-    }
-    return [];
-  }
-
-  static Future<List<dynamic>> getDistanciasPlanta(String token) async {
-    final url = Uri.parse('$baseUrl/api/distancias_planta');
-    final res = await http.get(url, headers: _headers(token));
-    if (res.statusCode == 200) {
-      return jsonDecode(res.body);
-    }
-    return [];
-  }*/
 }
