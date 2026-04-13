@@ -215,14 +215,14 @@ class _CrearBoletaInvernaderoScreenState
     int? temporada;
     DateTime? fechaSiembraLocal;
 
-    if (item == null)
+    if (item == null) {
       return {
         'productorId': null,
         'valvulaId': null,
         'temporada': null,
         'fechaSiembra': null,
       };
-
+    }
     if (item is BoletaInvernadero) {
       final dyn = item as dynamic;
       try {

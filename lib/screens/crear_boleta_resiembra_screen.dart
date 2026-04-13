@@ -9,7 +9,6 @@ import '../models/valvula.dart';
 import '../models/variedad.dart';
 import '../models/variedad_productor.dart';
 import '../models/boleta_resiembra.dart';
-import '../services/boxes.dart';
 import '../services/outbox_service.dart';
 
 class CrearBoletaResiembraScreen extends StatefulWidget {
@@ -117,7 +116,6 @@ class _CrearBoletaResiembraScreenState
   /// - leerla de algún Box de configuraciones, o
   /// - dejar un valor por defecto (ej. 2026) y que el backend la reajuste.
   int _temporadaActualLocal() {
-    // TODO: si tienes una box de configuraciones offline, léela aquí.
     return 2026;
   }
 
