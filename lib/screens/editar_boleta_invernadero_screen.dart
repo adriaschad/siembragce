@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hive/hive.dart';
-import 'package:intencion_siembra/services/boxes.dart';
 import 'package:intencion_siembra/services/outbox_service.dart';
 
 import '../models/boleta_invernadero.dart';
