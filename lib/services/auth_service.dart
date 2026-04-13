@@ -92,7 +92,10 @@ class AuthService {
         statusCode: 401,
       );
 
-    final userId = prefs.getInt_notnull(_kUserKey(email));
+    final userId = prefs.getInt(_kUserKey(email));
+    if (userId == null) {
+      throw Exception('No se encontró userId para $email');
+    }
     final productorId = prefs.getInt(_kProdKey(email));
 
     return LoginResult(

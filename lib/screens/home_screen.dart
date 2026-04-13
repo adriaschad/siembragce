@@ -174,7 +174,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         setState(() => _userCanCreateInvernadero = false);
         return;
       }
-      final userId = prefs.getInt_notnull('offline_userId_$email');
+      final userId = prefs.getInt('offline_userId_$email');
+      if (userId == null) {
+        throw Exception('No se encontró offline_userId para $email');
+      }
 
       // Intenta leer la caja 'users' (si la sincronizas)
       if (Hive.isBoxOpen('users')) {

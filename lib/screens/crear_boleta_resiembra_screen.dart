@@ -105,7 +105,11 @@ class _CrearBoletaResiembraScreenState
     final prefs = await SharedPreferences.getInstance();
     final email = prefs.getString('remembered_email');
     if (email == null) return 1;
-    return prefs.getInt_notnull('offline_userId_$email');
+    final userId = prefs.getInt('offline_userId_$email');
+    if (userId == null) {
+      throw Exception('No se encontró offline_userId para $email');
+    }
+    return userId;
   }
 
   /// En el offline no sabemos la temporada actual de la tabla configuraciones,

@@ -165,7 +165,11 @@ class _CrearBoletaScreenState extends State<CrearBoletaScreen> {
     final prefs = await SharedPreferences.getInstance();
     final email = prefs.getString('remembered_email');
     if (email == null) return 1;
-    return prefs.getInt_notnull('offline_userId_$email');
+    final userId = prefs.getInt('offline_userId_$email');
+    if (userId == null) {
+      throw Exception('No se encontró offline_userId para $email');
+    }
+    return userId;
   }
 
   Future<void> guardarBoleta() async {
