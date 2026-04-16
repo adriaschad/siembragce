@@ -68,11 +68,13 @@ Future<void> _earlyInit() async {
   _registerAdapterSafe(CaracteristicaSiembraAdapter());
 
   // Inicializar notificaciones locales
-  await LocalNotificationService.init();
+  //await LocalNotificationService.init();
 }
 
 Future<void> _postFrameInit() async {
   try {
+    await LocalNotificationService.init();
+
     final prefs = await SharedPreferences.getInstance();
     final hasToken = (prefs.getString('user_token') ?? '').isNotEmpty;
 
@@ -93,16 +95,18 @@ Future<void> main() async {
     FlutterError.dumpErrorToConsole(details);
   };
   PlatformDispatcher.instance.onError = (error, stack) {
-    // ignore: avoid_print
     print('Zoned error: $error\n$stack');
     return false;
   };
 
-  await _earlyInit();
+  try {
+    await _earlyInit();
+  } catch (e, st) {
+    print('earlyInit error: $e\n$st');
+  }
 
   runApp(const MyApp());
 
-  // Haz el resto después del primer frame
   WidgetsBinding.instance.addPostFrameCallback((_) {
     unawaited(_postFrameInit());
   });
