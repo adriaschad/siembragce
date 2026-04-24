@@ -320,53 +320,72 @@ class _BoletaMuestreoFormState extends State<BoletaMuestreoForm> {
   // Imagenes / compresión
   // -----------------------
   Future<void> _pickImage(ImageSource source) async {
-    final picked = await _picker.pickImage(source: source, imageQuality: 100);
-    if (picked == null) return;
-
-    setState(() {
-      _isCompressing = true;
-      _compressingFileName = picked.name;
-    });
-
     try {
-      final compressedPath = await ImageUtils.compressAndSave(
-        picked.path,
-        maxWidth: 1600,
-        quality: 80,
-        prefix: 'bm',
-      );
-      final thumbPath = await ImageUtils.generateThumbnail(
-        compressedPath,
-        width: 300,
-        quality: 65,
+      final picked = await _picker.pickImage(
+        source: source,
+        imageQuality: 100,
       );
 
+      if (picked == null) return;
+
+      if (!mounted) return;
       setState(() {
-        fotos.add({
-          'path': compressedPath,
-          'thumb': thumbPath,
-          'observacion': '',
-        });
+        _isCompressing = true;
+        _compressingFileName = picked.name;
       });
-    } catch (e, st) {
-      debugPrint('Error compressing image: $e\n$st');
+
       try {
+        final compressedPath = await ImageUtils.compressAndSave(
+          picked.path,
+          maxWidth: 1600,
+          quality: 80,
+          prefix: 'bm',
+        );
+
+        final thumbPath = await ImageUtils.generateThumbnail(
+          compressedPath,
+          width: 300,
+          quality: 65,
+        );
+
+        if (!mounted) return;
+        setState(() {
+          fotos.add({
+            'path': compressedPath,
+            'thumb': thumbPath,
+            'observacion': '',
+          });
+        });
+      } catch (e, st) {
+        debugPrint('Error compressing image: $e\n$st');
+
         final appDir = await getApplicationDocumentsDirectory();
         final target = File(
           '${appDir.path}/${DateTime.now().millisecondsSinceEpoch}_${picked.name}',
         );
+
         await File(picked.path).copy(target.path);
+
+        if (!mounted) return;
         setState(() {
-          fotos.add({'path': target.path, 'thumb': null, 'observacion': ''});
+          fotos.add({
+            'path': target.path,
+            'thumb': null,
+            'observacion': '',
+          });
         });
-      } catch (e2) {
-        debugPrint('Error copying original image: $e2');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Error al procesar la imagen.')),
-          );
-        }
       }
+    } catch (e, st) {
+      debugPrint('Error selecting image: $e\n$st');
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No se pudo abrir la cámara o galería. Verifique los permisos del dispositivo.',
+          ),
+        ),
+      );
     } finally {
       if (!mounted) return;
       setState(() {

@@ -62,5 +62,14 @@
 			</dict>
 		</dict>
 	</dict>
+
+	<key>NSCameraUsageDescription</key>
+	<string>La aplicación usa la cámara para tomar fotografías de las boletas de muestreo.</string>
+
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>La aplicación usa la galería para seleccionar fotografías de las boletas de muestreo.</string>
+
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>La aplicación puede guardar fotografías relacionadas con las boletas de muestreo.</string>
 </dict>
 </plist>
