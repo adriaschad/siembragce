@@ -91,6 +91,9 @@ Future<void> _postFrameInit() async {
 }
 
 Future<void> main() async {
+  // ignore: avoid_print
+  print('[BOOT] main() iniciado');
+
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.dumpErrorToConsole(details);
   };
