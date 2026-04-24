@@ -6,51 +6,62 @@ class LocalNotificationService {
 
   static bool _initialized = false;
 
-  /// Inicializa el plugin de notificaciones (llamar una vez al inicio).
   static Future<void> init() async {
     if (_initialized) return;
 
-    const AndroidInitializationSettings androidInit =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
+    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
 
-    const InitializationSettings initSettings = InitializationSettings(
+    const iosInit = DarwinInitializationSettings(
+      requestAlertPermission: true,
+      requestBadgePermission: true,
+      requestSoundPermission: true,
+    );
+
+    const initSettings = InitializationSettings(
       android: androidInit,
-      // Si luego agregas iOS:
-      // iOS: DarwinInitializationSettings(),
+      iOS: iosInit,
     );
 
     await _plugin.initialize(
       initSettings,
-      onDidReceiveNotificationResponse: (NotificationResponse response) {
-        // Aquí puedes manejar taps en la notificación si quieres
-      },
+      onDidReceiveNotificationResponse: (NotificationResponse response) {},
     );
+
+    // En iOS conviene pedir permisos explícitamente también
+    await _plugin
+        .resolvePlatformSpecificImplementation<
+          IOSFlutterLocalNotificationsPlugin
+        >()
+        ?.requestPermissions(alert: true, badge: true, sound: true);
 
     _initialized = true;
   }
 
-  /// Muestra una notificación simple.
   static Future<void> showNotification({
     required int id,
     required String title,
     required String body,
   }) async {
-    if (!_initialized) {
-      await init();
-    }
+    if (!_initialized) await init();
 
-    const AndroidNotificationDetails androidDetails =
-        AndroidNotificationDetails(
-          'cosechas_channel', // id del canal
-          'Próximas cosechas', // nombre del canal
-          channelDescription: 'Alertas de próximas cosechas',
-          importance: Importance.max,
-          priority: Priority.high,
-          playSound: true,
-        );
+    const androidDetails = AndroidNotificationDetails(
+      'cosechas_channel',
+      'Próximas cosechas',
+      channelDescription: 'Alertas de próximas cosechas',
+      importance: Importance.max,
+      priority: Priority.high,
+      playSound: true,
+    );
 
-    const NotificationDetails platformDetails = NotificationDetails(
+    const iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+    );
+
+    const platformDetails = NotificationDetails(
       android: androidDetails,
+      iOS: iosDetails,
     );
 
     await _plugin.show(id, title, body, platformDetails);
